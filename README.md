@@ -1,32 +1,65 @@
+````markdown
 ## mango
 
-<a href="https://circleci.com/gh/ddollar/mango">
-  <img align="right" src="https://circleci.com/gh/ddollar/mango.svg?style=svg">
-</a>
+[Foreman](https://github.com/ddollar/foreman) in Go, forked to add optional Loki-based log aggregation.
 
-[Foreman](https://github.com/ddollar/foreman) in Go.
+**Author:** jad21
+
+---
 
 ### Installation
 
-[Downloads](https://dl.equinox.io/ddollar/mango/stable)
+```bash
+go install github.com/jad21/mango@latest
+````
 
-##### Compile from Source
-
-    $ go get -u github.com/ddollar/mango
+---
 
 ### Usage
 
-    $ cat Procfile
-    web: bin/web start -p $PORT
-    worker: bin/worker queue=FOO
+```bash
+$ cat Procfile
+web:    bin/web start -p $PORT
+worker: bin/worker queue=FOO
 
-    $ mango start
-    web    | listening on port 5000
-    worker | listening to queue FOO
+$ mango start
+web    | listening on port 5000
+worker | listening to queue FOO
+```
 
-Use `mango help` to get a list of available commands, and `mango help
-<command>` for more detailed help on a specific command.
+Use `mango help` to list all commands, and `mango help <command>` for detailed help.
+
+#### Loki Logging (opcional)
+
+Configura tus logs hacia Grafana Loki en **`.mango`** o mediante flags:
+
+1. **Archivo `.mango`:**
+
+   ```ini
+   procfile=Procfile
+   port=5000
+   concurrency=web=1,worker=2
+   shutdown_grace_time=3
+
+   # Loki (opcional)
+   loki.url=http://localhost:3100/loki/api/v1/push
+   loki.job=my-app
+   ```
+
+2. **Flags de CLI:**
+
+   ```bash
+   mango start \
+     --loki.url=http://localhost:3100/loki/api/v1/push \
+     --loki.job=my-app
+   ```
+
+Si `--loki.url` queda vacío, mango funcionará sin enviar logs a Loki.
+
+---
 
 ### License
 
-Apache 2.0 &copy; 2015 David Dollar
+Apache 2.0 © 2015 David Dollar, © 2025 jad21
+Fork incluye integración con Grafana Loki para agregación de logs.
+
