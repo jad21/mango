@@ -8,168 +8,178 @@ import (
 func TestParseConcurrencyFlagEmpty(t *testing.T) {
 	c, err := parseConcurrency("")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parseConcurrency(\"\") debería funcionar sin error: %s", err)
 	}
 	if len(c) > 0 {
-		t.Fatal("expected no concurrency settings with ''")
+		t.Fatalf("esperaba 0 configuraciones, obtuve %d", len(c))
 	}
 }
 
-func TestParseConcurrencyFlagSimle(t *testing.T) {
+func TestParseConcurrencyFlagSimple(t *testing.T) {
 	c, err := parseConcurrency("foo=2")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parseConcurrency(\"foo=2\") debería funcionar sin error: %s", err)
 	}
-
 	if len(c) != 1 {
-		t.Fatal("expected 1 concurrency settings with 'foo=2'")
+		t.Fatalf("esperaba 1 configuración, obtuve %d", len(c))
 	}
-
 	if c["foo"] != 2 {
-		t.Fatal("expected concurrency settings of 2 with 'foo=2'")
+		t.Fatalf("esperaba foo=2, obtuve foo=%d", c["foo"])
 	}
 }
 
 func TestParseConcurrencyFlagMultiple(t *testing.T) {
 	c, err := parseConcurrency("foo=2,bar=3")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("parseConcurrency(\"foo=2,bar=3\") debería funcionar sin error: %s", err)
 	}
-
 	if len(c) != 2 {
-		t.Fatal("expected 1 concurrency settings with 'foo=2'")
+		t.Fatalf("esperaba 2 configuraciones, obtuve %d", len(c))
 	}
-
 	if c["foo"] != 2 {
-		t.Fatal("expected concurrency settings of 2 with 'foo=2'")
+		t.Fatalf("esperaba foo=2, obtuve foo=%d", c["foo"])
 	}
-
 	if c["bar"] != 3 {
-		t.Fatal("expected concurrency settings of 3 with 'bar=3'")
-	}
-}
-
-func TestParseConcurrencyFlagNonInt(t *testing.T) {
-	_, err := parseConcurrency("foo=x")
-	if err == nil {
-		t.Fatal("foo=x should fail")
+		t.Fatalf("esperaba bar=3, obtuve bar=%d", c["bar"])
 	}
 }
 
 func TestParseConcurrencyFlagWhitespace(t *testing.T) {
 	c, err := parseConcurrency("foo   =   2, bar = 3")
 	if err != nil {
-		t.Fatalf("foo   =   2, bar = 4 should not fail:%s", err)
+		t.Fatalf("parseConcurrency con espacios no debería fallar: %s", err)
 	}
-
 	if len(c) != 2 {
-		t.Fatal("expected 1 concurrency settings with 'foo=2'")
+		t.Fatalf("esperaba 2 configuraciones, obtuve %d", len(c))
 	}
-
 	if c["foo"] != 2 {
-		t.Fatal("expected concurrency settings of 2 with 'foo=2'")
+		t.Fatalf("esperaba foo=2, obtuve foo=%d", c["foo"])
 	}
-
 	if c["bar"] != 3 {
-		t.Fatal("expected concurrency settings of 3 with 'bar=3'")
+		t.Fatalf("esperaba bar=3, obtuve bar=%d", c["bar"])
 	}
 }
 
-func TestParseConcurrencyFlagMultipleEquals(t *testing.T) {
-	_, err := parseConcurrency("foo===2")
-	if err == nil {
-		t.Fatalf("foo===2 should fail: %s", err)
+func TestParseConcurrencyFlagInvalid(t *testing.T) {
+	cases := []string{
+		"foo=x",
+		"foo===2",
+		"foobar",
+		"foo=",
+		"=",
+		"=1",
+		",",
+		",,,",
+	}
+	for _, input := range cases {
+		if _, err := parseConcurrency(input); err == nil {
+			t.Fatalf("esperaba error para %q, pero no lo hubo", input)
+		}
 	}
 }
 
-func TestParseConcurrencyFlagNoValue(t *testing.T) {
-	_, err := parseConcurrency("foo=")
-	if err == nil {
-		t.Fatalf("foo= should fail: %s", err)
+func TestParseConcurrencyZeroValue(t *testing.T) {
+	c, err := parseConcurrency("foo=0,bar=0")
+	if err != nil {
+		t.Fatalf("parseConcurrency(\"foo=0,bar=0\") no debería fallar: %s", err)
 	}
-
-	_, err = parseConcurrency("=")
-	if err == nil {
-		t.Fatalf("= should fail: %s", err)
+	if c["foo"] != 0 || c["bar"] != 0 {
+		t.Fatalf("esperaba foo=0 y bar=0, obtuve foo=%d, bar=%d", c["foo"], c["bar"])
 	}
+}
 
-	_, err = parseConcurrency("=1")
-	if err == nil {
-		t.Fatalf("= should fail: %s", err)
+func TestParseConcurrencyOnlySpaces(t *testing.T) {
+	c, err := parseConcurrency("   ")
+	if err != nil {
+		t.Fatalf("parseConcurrency con solo espacios no debería fallar: %s", err)
 	}
-
-	_, err = parseConcurrency(",")
-	if err == nil {
-		t.Fatalf(", should fail: %s", err)
+	if len(c) != 0 {
+		t.Fatalf("esperaba 0 configuraciones para solo espacios, obtuve %d", len(c))
 	}
-
-	_, err = parseConcurrency(",,,")
-	if err == nil {
-		t.Fatalf(",,, should fail: %s", err)
-	}
-
 }
 
 func TestPortFromEnv(t *testing.T) {
+	// Caso por defecto
+	os.Unsetenv("PORT")
 	env := make(Env)
 	port, err := basePort(env)
 	if err != nil {
-		t.Fatalf("Can not get base port: %s", err)
+		t.Fatalf("no pudo obtener puerto base: %s", err)
 	}
-	if port != 5000 {
-		t.Fatal("Base port should be 5000")
+	if port != defaultPort {
+		t.Fatalf("esperaba puerto %d, obtuve %d", defaultPort, port)
 	}
 
+	// Con variable de entorno
 	os.Setenv("PORT", "4000")
 	port, err = basePort(env)
 	if err != nil {
-		t.Fatal("Can not get port: %s", err)
+		t.Fatalf("no pudo leer PORT=4000: %s", err)
 	}
 	if port != 4000 {
-		t.Fatal("Base port should be 4000")
+		t.Fatalf("esperaba puerto 4000, obtuve %d", port)
 	}
 
+	// Con env map
 	env["PORT"] = "6000"
 	port, err = basePort(env)
 	if err != nil {
-		t.Fatalf("Can not get base port: %s", err)
+		t.Fatalf("no pudo leer env[\"PORT\"]=6000: %s", err)
 	}
 	if port != 6000 {
-		t.Fatal("Base port should be 6000")
+		t.Fatalf("esperaba puerto 6000, obtuve %d", port)
 	}
 
-	env["PORT"] = "forego"
-	port, err = basePort(env)
-	if err == nil {
-		t.Fatalf("Port 'forego' should fail: %s", err)
+	// Valor no entero
+	env["PORT"] = "mango"
+	if _, err := basePort(env); err == nil {
+		t.Fatal("esperaba error al leer PORT=\"mango\", pero no lo hubo")
 	}
-
 }
 
-func TestConfigBeOverrideByForegoFile(t *testing.T) {
+func TestBasePortFlagPriority(t *testing.T) {
+	// Respaldar y restaurar flagPort
+	old := flagPort
+	defer func() { flagPort = old }()
+	flagPort = 7000
+
+	env := make(Env)
+	port, err := basePort(env)
+	if err != nil {
+		t.Fatalf("basePort con flagPort no debería fallar: %s", err)
+	}
+	if port != 7000 {
+		t.Fatalf("esperaba puerto 7000, obtuve %d", port)
+	}
+}
+
+func TestReadConfigFileOverride(t *testing.T) {
 	var procfile = "Profile"
 	var port = 5000
 	var concurrency string = "web=2"
 	var gracetime int = 3
-	err := readConfigFile("./fixtures/configs/.forego", &procfile, &port, &concurrency, &gracetime)
-
+	// Se asume que ./fixtures/configs/.mango existe con valores de prueba
+	err := readConfigFile("./fixtures/configs/.mango", &procfile, &port, &concurrency, &gracetime, &flagLokiURL, &flagLokiJob)
 	if err != nil {
-		t.Fatalf("Cannot set default values from forego config file")
+		t.Fatalf("no pudo leer ./fixtures/configs/.mango: %s", err)
 	}
-
 	if procfile != "Procfile.dev" {
-		t.Fatal("Procfile should be Procfile.dev")
+		t.Fatalf("esperaba Procfile.dev, obtuve %q", procfile)
 	}
-
 	if port != 15000 {
-		t.Fatal("port should be 15000, got %d", port)
+		t.Fatalf("esperaba puerto 15000, obtuve %d", port)
 	}
-
-	if concurrency != "foo=2,bar=3" {
-		t.Fatal("concurrency should be 'foo=2,bar=3', got %s", concurrency)
+	if concurrency != "foo=2,bar=3,web=3" {
+		t.Fatalf("esperaba concurrency=\"foo=2,bar=3,web=3\", obtuve %q", concurrency)
 	}
-
 	if gracetime != 30 {
-		t.Fatal("gracetime should be 3, got %d", gracetime)
+		t.Fatalf("esperaba gracetime=30, obtuve %d", gracetime)
+	}
+}
+
+func TestReadConfigFileNotExist(t *testing.T) {
+	pf, p, c, g := "Pf", 1234, "x=1", 5
+	if err := readConfigFile("./no_such_file", &pf, &p, &c, &g, &flagLokiURL, &flagLokiJob); err == nil {
+		t.Fatal("esperaba error al leer config inexistente, pero no lo hubo")
 	}
 }

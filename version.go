@@ -11,7 +11,7 @@ Display current version
 
 Examples:
 
-	forego version
+	mango version
 `,
 }
 

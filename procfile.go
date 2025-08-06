@@ -9,7 +9,7 @@ import (
 	"regexp"
 )
 
-var procfileEntryRegexp = regexp.MustCompile("^([A-Za-z0-9_-]+):\\s*(.+)$")
+var procfileEntryRegexp = regexp.MustCompile(`^([A-Za-z0-9_-]+):\s*(.+)$`)
 
 type ProcfileEntry struct {
 	Name    string
@@ -39,7 +39,7 @@ func (pf *Procfile) HasProcess(name string) (exists bool) {
 }
 
 func (pf *Procfile) LongestProcessName(concurrency map[string]int) (longest int) {
-	longest = 6 // length of forego
+	longest = 6 // length of mango
 	for _, entry := range pf.Entries {
 		thisLen := len(entry.Name)
 		// The "."
@@ -68,7 +68,7 @@ func parseProcfile(r io.Reader) (*Procfile, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("Reading Procfile: %s", err)
+		return nil, fmt.Errorf("reading Procfile: %v", err)
 	}
 	return pf, nil
 }

@@ -33,17 +33,17 @@ func runHelp(cmd *Command, args []string) {
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "Unknown help topic: %q. Run 'forego help'.\n", args[0])
+	fmt.Fprintf(os.Stderr, "Unknown help topic: %q. Run 'mango help'.\n", args[0])
 	os.Exit(2)
 }
 
 var usageTemplate = template.Must(template.New("usage").Parse(`
-Usage: forego <command> [<args>]
+Usage: mango <command> [<args>]
 
 Available commands:{{range .Commands}}{{if .Runnable}}{{if .List}}
    {{.Name | printf "%-8s"}}  {{.Short}}{{end}}{{end}}{{end}}
 
-Run 'forego help [command]' for details.
+Run 'mango help [command]' for details.
 `[1:]))
 
 func printUsage() {

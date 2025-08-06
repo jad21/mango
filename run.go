@@ -14,7 +14,7 @@ Run a one-off command
 
 Examples:
 
-  forego run bin/migrate
+  mango run bin/migrate
 `,
 }
 

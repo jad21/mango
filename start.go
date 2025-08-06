@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -21,6 +23,12 @@ var flagConcurrency string
 var flagRestart bool
 var flagShutdownGraceTime int
 var envs envFiles
+
+// Nuevos flags para Loki
+var flagLokiURL string
+var flagLokiJob string
+
+var lokiClient *LokiClient
 
 var cmdStart = &Command{
 	Run:   runStart,
@@ -51,14 +59,14 @@ The following options are available:
                one instance of each process is started.
 
   -r           Restart a process which exits. Without this, if a process exits,
-               forego will kill all other processes and exit.
+               mango will kill all other processes and exit.
 
   -t shutdown_grace_time
                Set the shutdown grace time that each process is given after
                being asked to stop. Once this grace time expires, the process is
                forcibly terminated. By default, it is 3 seconds.
 
-If there is a file named .forego in the current directory, it will be read in
+If there is a file named .mango in the current directory, it will be read in
 the same way as an environment file, and the values of variables procfile, port,
 concurrency, and shutdown_grace_time used to change the corresponding default
 values.
@@ -66,16 +74,16 @@ values.
 Examples:
 
   # start every process
-  forego start
+  mango start
 
   # start only the web process
-  forego start web
+  mango start web
 
   # start every process specified in Procfile.test, with the environment specified in .env.test
-  forego start -f Procfile.test -e .env.test
+  mango start -f Procfile.test -e .env.test
 
   # start every process, with a timeout of 30 seconds
-  forego start -t 30
+  mango start -t 30
 `,
 }
 
@@ -86,11 +94,32 @@ func init() {
 	cmdStart.Flag.StringVar(&flagConcurrency, "c", "", "concurrency")
 	cmdStart.Flag.BoolVar(&flagRestart, "r", false, "restart")
 	cmdStart.Flag.IntVar(&flagShutdownGraceTime, "t", defaultShutdownGraceTime, "shutdown grace time")
-	err := readConfigFile(".forego", &flagProcfile, &flagPort, &flagConcurrency, &flagShutdownGraceTime)
+
+	// Registrar flags de Loki
+	cmdStart.Flag.StringVar(&flagLokiURL, "loki.url", "", "URL de Loki (ej: http://localhost:3100)")
+	cmdStart.Flag.StringVar(&flagLokiJob, "loki.job", "forego", "Etiqueta job para Loki")
+
+	err := readConfigFile(
+		".mango",
+		&flagProcfile,
+		&flagPort,
+		&flagConcurrency,
+		&flagShutdownGraceTime,
+		&flagLokiURL,
+		&flagLokiJob,
+	)
 	handleError(err)
 }
 
-func readConfigFile(config_path string, flagProcfile *string, flagPort *int, flagConcurrency *string, flagShutdownGraceTime *int) error {
+func readConfigFile(
+	config_path string,
+	flagProcfile *string,
+	flagPort *int,
+	flagConcurrency *string,
+	flagShutdownGraceTime *int,
+	flagLokiURL *string,
+	flagLokiJob *string,
+) error {
 	config, err := ReadConfig(config_path)
 
 	if config["procfile"] != "" {
@@ -109,6 +138,13 @@ func readConfigFile(config_path string, flagProcfile *string, flagPort *int, fla
 		*flagShutdownGraceTime = defaultShutdownGraceTime
 	}
 	*flagConcurrency = config["concurrency"]
+
+	if config["loki.url"] != "" {
+		*flagLokiURL = config["loki.url"]
+	}
+	if config["loki.job"] != "" {
+		*flagLokiJob = config["loki.job"]
+	}
 	return err
 }
 
@@ -121,13 +157,13 @@ func parseConcurrency(value string) (map[string]int, error) {
 	parts := strings.Split(value, ",")
 	for _, part := range parts {
 		if !strings.Contains(part, "=") {
-			return concurrency, errors.New("Concurrency should be in the format: foo=1,bar=2")
+			return concurrency, errors.New("concurrency should be in the format: foo=1,bar=2")
 		}
 
 		nameValue := strings.Split(part, "=")
 		n, v := strings.TrimSpace(nameValue[0]), strings.TrimSpace(nameValue[1])
 		if n == "" || v == "" {
-			return concurrency, errors.New("Concurrency should be in the format: foo=1,bar=2")
+			return concurrency, errors.New("concurrency should be in the format: foo=1,bar=2")
 		}
 
 		numProcs, err := strconv.ParseInt(v, 10, 16)
@@ -140,7 +176,7 @@ func parseConcurrency(value string) (map[string]int, error) {
 	return concurrency, nil
 }
 
-type Forego struct {
+type mango struct {
 	outletFactory *OutletFactory
 
 	teardown, teardownNow Barrier // signal shutting down
@@ -148,7 +184,7 @@ type Forego struct {
 	wg sync.WaitGroup
 }
 
-func (f *Forego) monitorInterrupt() {
+func (f *mango) monitorInterrupt() {
 	handler := make(chan os.Signal, 1)
 	signal.Notify(handler, syscall.SIGALRM, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
@@ -180,21 +216,18 @@ func basePort(env Env) (int, error) {
 	return defaultPort, nil
 }
 
-func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+
 	port, err := basePort(env)
 	if err != nil {
 		panic(err)
 	}
+	port += idx * 100
 
-	port = port + (idx * 100)
-
-	const interactive = false
 	workDir := filepath.Dir(flagProcfile)
-	ps := NewProcess(workDir, proc.Command, env, interactive)
-	procName := fmt.Sprint(proc.Name, ".", procNum+1)
+	ps := NewProcess(workDir, proc.Command, env, false)
+	procName := fmt.Sprintf("%s.%d", proc.Name, procNum+1)
 	ps.Env["PORT"] = strconv.Itoa(port)
-
-	ps.Stdin = nil
 
 	stdout, err := ps.StdoutPipe()
 	if err != nil {
@@ -205,10 +238,48 @@ func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of 
 		panic(err)
 	}
 
-	pipeWait := new(sync.WaitGroup)
+	pipeWait := &sync.WaitGroup{}
 	pipeWait.Add(2)
-	go of.LineReader(pipeWait, procName, idx, stdout, false)
-	go of.LineReader(pipeWait, procName, idx, stderr, true)
+
+	// Lectura de stdout
+	go func() {
+		defer pipeWait.Done()
+		var reader io.Reader = stdout
+		if lokiClient != nil {
+			pr, pw := io.Pipe()
+			reader = io.TeeReader(stdout, pw)
+
+			go func() {
+				scanner := bufio.NewScanner(pr)
+				for scanner.Scan() {
+					_ = lokiClient.Send(flagLokiJob, procName, scanner.Text())
+				}
+				pr.Close()
+			}()
+			defer pw.Close()
+		}
+		of.LineReader(pipeWait, procName, idx, reader, false)
+	}()
+
+	// Lectura de stderr
+	go func() {
+		defer pipeWait.Done()
+		var reader io.Reader = stderr
+		if lokiClient != nil {
+			pr, pw := io.Pipe()
+			reader = io.TeeReader(stderr, pw)
+
+			go func() {
+				scanner := bufio.NewScanner(pr)
+				for scanner.Scan() {
+					_ = lokiClient.Send(flagLokiJob, procName, scanner.Text())
+				}
+				pr.Close()
+			}()
+			defer pw.Close()
+		}
+		of.LineReader(pipeWait, procName, idx, reader, true)
+	}()
 
 	of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
 
@@ -242,7 +313,7 @@ func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of 
 			}
 
 		case <-f.teardown.Barrier():
-			// Forego tearing down
+			// mango tearing down
 
 			if !osHaveSigTerm {
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
@@ -277,8 +348,14 @@ func runStart(cmd *Command, args []string) {
 	of := NewOutletFactory()
 	of.Padding = pf.LongestProcessName(concurrency)
 
-	f := &Forego{
+	f := &mango{
 		outletFactory: of,
+	}
+
+	// ==== Inicializar cliente de Loki sólo si se ha configurado URL ====
+	if flagLokiURL != "" {
+		lokiClient = NewLokiClient(flagLokiURL, 10*time.Second)
+		of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
 	}
 
 	go f.monitorInterrupt()
@@ -302,11 +379,9 @@ func runStart(cmd *Command, args []string) {
 
 	defaultConcurrency := 1
 
-	var all bool
 	for name, num := range concurrency {
 		if name == "all" {
 			defaultConcurrency = num
-			all = true
 		}
 	}
 
@@ -315,8 +390,6 @@ func runStart(cmd *Command, args []string) {
 		if len(concurrency) > 0 {
 			if value, ok := concurrency[proc.Name]; ok {
 				numProcs = value
-			} else if !all {
-				continue
 			}
 		}
 		for i := 0; i < numProcs; i++ {

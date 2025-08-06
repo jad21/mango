@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var flagEnv string
+// var flagEnv string
 var flagProcfile string
 
 type Command struct {
@@ -16,13 +16,13 @@ type Command struct {
 
 	Disabled bool
 	Usage    string // first word is the command name
-	Short    string // `forego help` output
-	Long     string // `forego help cmd` output
+	Short    string // `mango help` output
+	Long     string // `mango help cmd` output
 }
 
 func (c *Command) printUsage() {
 	if c.Runnable() {
-		fmt.Printf("Usage: forego %s\n\n", c.Usage)
+		fmt.Printf("Usage: mango %s\n\n", c.Usage)
 	}
 	fmt.Println(strings.Trim(c.Long, "\n"))
 }
@@ -37,7 +37,7 @@ func (c *Command) Name() string {
 }
 
 func (c *Command) Runnable() bool {
-	return c.Run != nil && c.Disabled != true
+	return c.Run != nil && !c.Disabled
 }
 
 func (c *Command) List() bool {

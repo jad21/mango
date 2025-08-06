@@ -1,4 +1,4 @@
-BIN = forego
+BIN = mango
 SRC = $(shell find . -name '*.go' -not -path './vendor/*')
 
 .PHONY: all build clean lint release test

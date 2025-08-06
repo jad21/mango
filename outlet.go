@@ -18,11 +18,11 @@ type OutletFactory struct {
 }
 
 var colors = []ct.Color{
-	ct.Cyan,
 	ct.Yellow,
-	ct.Green,
-	ct.Magenta,
 	ct.Red,
+	ct.Magenta,
+	ct.Green,
+	ct.Cyan,
 	ct.Blue,
 }
 
@@ -64,7 +64,7 @@ func (of *OutletFactory) LineReader(wg *sync.WaitGroup, name string, index int, 
 }
 
 func (of *OutletFactory) SystemOutput(str string) {
-	of.WriteLine("forego", str, ct.White, ct.None, false)
+	of.WriteLine("mango", str, ct.White, ct.None, false)
 }
 
 func (of *OutletFactory) ErrorOutput(str string) {

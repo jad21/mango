@@ -1,3 +1,4 @@
+//go:build darwin || freebsd || linux || netbsd || openbsd
 // +build darwin freebsd linux netbsd openbsd
 
 package main
@@ -23,7 +24,6 @@ func (p *Process) PlatformSpecificInit() {
 		p.SysProcAttr = &syscall.SysProcAttr{}
 		p.SysProcAttr.Setsid = true
 	}
-	return
 }
 
 func (p *Process) SendSigTerm() {
