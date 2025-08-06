@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -74,4 +75,27 @@ func (c *LokiClient) Send(job, streamName, line string) error {
 	}
 
 	return nil
+}
+
+// WaitReady intenta hacer GET al endpoint /ready hasta maxRetries veces,
+// pausando "interval" entre cada intento, y retorna error si no obtiene 200 OK.
+func (c *LokiClient) WaitReady(maxRetries int, interval time.Duration) error {
+	readyURL := c.endpoint
+	if u, err := url.Parse(c.endpoint); err == nil {
+		u.Path = "/ready"
+		readyURL = u.String()
+	}
+	client := &http.Client{Timeout: interval}
+	for i := 0; i < maxRetries; i++ {
+		resp, err := client.Get(readyURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return nil
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(interval)
+	}
+	return fmt.Errorf("loki no respondió en %s tras %d intentos", readyURL, maxRetries)
 }

@@ -354,8 +354,10 @@ func runStart(cmd *Command, args []string) {
 
 	// ==== Inicializar cliente de Loki sólo si se ha configurado URL ====
 	if flagLokiURL != "" {
-		lokiClient = NewLokiClient(flagLokiURL, 10*time.Second)
-		of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
+		// lokiClient = NewLokiClient(flagLokiURL, 10*time.Second)
+		// of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
+		initLoki(of)
+		handleError(err)
 	}
 
 	go f.monitorInterrupt()
@@ -402,4 +404,21 @@ func runStart(cmd *Command, args []string) {
 	<-f.teardown.Barrier()
 
 	f.wg.Wait()
+}
+
+// initLoki inicializa el cliente de Loki y espera a que esté listo antes de continuar.
+func initLoki(of *OutletFactory) {
+	if flagLokiURL == "" {
+		return
+	}
+	lokiClient = NewLokiClient(flagLokiURL, 10*time.Second)
+	of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
+
+	// Espera readiness
+	of.SystemOutput("Esperando a que Loki esté listo...")
+	if err := lokiClient.WaitReady(10, 1*time.Second); err != nil {
+		of.SystemOutput("Aviso: no se pudo verificar readiness de Loki: " + err.Error())
+	} else {
+		of.SystemOutput("Loki está listo")
+	}
 }
