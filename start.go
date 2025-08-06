@@ -217,18 +217,20 @@ func basePort(env Env) (int, error) {
 }
 
 func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
-
+	// Determinar puerto
 	port, err := basePort(env)
 	if err != nil {
 		panic(err)
 	}
 	port += idx * 100
 
+	// Crear proceso
 	workDir := filepath.Dir(flagProcfile)
 	ps := NewProcess(workDir, proc.Command, env, false)
 	procName := fmt.Sprintf("%s.%d", proc.Name, procNum+1)
 	ps.Env["PORT"] = strconv.Itoa(port)
 
+	// Tubos para capturar stdout/stderr
 	stdout, err := ps.StdoutPipe()
 	if err != nil {
 		panic(err)
@@ -238,12 +240,12 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 		panic(err)
 	}
 
+	// WaitGroup para esperar a que stdout y stderr terminen
 	pipeWait := &sync.WaitGroup{}
-	pipeWait.Add(2)
 
-	// Lectura de stdout
+	// --- Stdout ---
+	pipeWait.Add(1)
 	go func() {
-		defer pipeWait.Done()
 		var reader io.Reader = stdout
 		if lokiClient != nil {
 			pr, pw := io.Pipe()
@@ -258,12 +260,13 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			}()
 			defer pw.Close()
 		}
+		// LineReader hace un Done() al acabar
 		of.LineReader(pipeWait, procName, idx, reader, false)
 	}()
 
-	// Lectura de stderr
+	// --- Stderr ---
+	pipeWait.Add(1)
 	go func() {
-		defer pipeWait.Done()
 		var reader io.Reader = stderr
 		if lokiClient != nil {
 			pr, pw := io.Pipe()
@@ -283,23 +286,27 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 
 	of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
 
-	finished := make(chan struct{}) // closed on process exit
-
-	err = ps.Start()
-	if err != nil {
+	// Iniciar el proceso
+	if err := ps.Start(); err != nil {
 		f.teardown.Fall()
 		of.SystemOutput(fmt.Sprint("Failed to start ", procName, ": ", err))
 		return
 	}
 
+	// Canal cerrado cuando el proceso y la lectura de salidas finaliza
+	finished := make(chan struct{})
+
+	// Goroutine que espera stdout+stderr + ps.Wait()
 	f.wg.Add(1)
 	go func() {
 		defer f.wg.Done()
 		defer close(finished)
+
 		pipeWait.Wait()
 		ps.Wait()
 	}()
 
+	// Goroutine que maneja reinicio o teardown
 	f.wg.Add(1)
 	go func() {
 		defer f.wg.Done()
@@ -313,8 +320,6 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			}
 
 		case <-f.teardown.Barrier():
-			// mango tearing down
-
 			if !osHaveSigTerm {
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
 				ps.Process.Kill()
@@ -324,7 +329,6 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			of.SystemOutput(fmt.Sprintf("sending SIGTERM to %s", procName))
 			ps.SendSigTerm()
 
-			// Give the process a chance to exit, otherwise kill it.
 			select {
 			case <-f.teardownNow.Barrier():
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
