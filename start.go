@@ -235,7 +235,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 	} else {
 		procName = proc.Name
 	}
-	if port >= 0 {
+	if port > 0 {
 		ps.Env["PORT"] = strconv.Itoa(port)
 	}
 
@@ -293,7 +293,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 		of.LineReader(pipeWait, procName, idx, reader, true)
 	}()
 
-	if port >= 0 {
+	if port > 0 {
 		of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
 	} else {
 		of.SystemOutput(fmt.Sprintf("starting %s", procName))
