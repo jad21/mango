@@ -222,13 +222,18 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 	if err != nil {
 		panic(err)
 	}
-	port += idx * 100
+	if port > 0 {
+		port += idx * 100
+	}
 
 	// Crear proceso
 	workDir := filepath.Dir(flagProcfile)
 	ps := NewProcess(workDir, proc.Command, env, false)
+
 	procName := fmt.Sprintf("%s.%d", proc.Name, procNum+1)
-	ps.Env["PORT"] = strconv.Itoa(port)
+	if port >= 0 {
+		ps.Env["PORT"] = strconv.Itoa(port)
+	}
 
 	// Tubos para capturar stdout/stderr
 	stdout, err := ps.StdoutPipe()
@@ -284,7 +289,11 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 		of.LineReader(pipeWait, procName, idx, reader, true)
 	}()
 
-	of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
+	if port >= 0 {
+		of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
+	} else {
+		of.SystemOutput(fmt.Sprintf("starting %s", procName))
+	}
 
 	// Iniciar el proceso
 	if err := ps.Start(); err != nil {
