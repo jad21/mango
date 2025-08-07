@@ -229,8 +229,12 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 	// Crear proceso
 	workDir := filepath.Dir(flagProcfile)
 	ps := NewProcess(workDir, proc.Command, env, false)
-
-	procName := fmt.Sprintf("%s.%d", proc.Name, procNum+1)
+	var procName string
+	if procNum > 1 {
+		procName = fmt.Sprintf("%s.%d", proc.Name, procNum+1)
+	} else {
+		procName = proc.Name
+	}
 	if port >= 0 {
 		ps.Env["PORT"] = strconv.Itoa(port)
 	}
@@ -259,7 +263,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			go func() {
 				scanner := bufio.NewScanner(pr)
 				for scanner.Scan() {
-					_ = lokiClient.Send(flagLokiJob, procName, scanner.Text())
+					lokiClient.Send(flagLokiJob, procName, scanner.Text())
 				}
 				pr.Close()
 			}()
@@ -280,7 +284,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			go func() {
 				scanner := bufio.NewScanner(pr)
 				for scanner.Scan() {
-					_ = lokiClient.Send(flagLokiJob, procName, scanner.Text())
+					lokiClient.Send(flagLokiJob, procName, scanner.Text())
 				}
 				pr.Close()
 			}()
@@ -371,6 +375,7 @@ func runStart(cmd *Command, args []string) {
 		// of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
 		initLoki(of)
 		handleError(err)
+		defer lokiClient.Close()
 	}
 
 	go f.monitorInterrupt()
@@ -421,10 +426,10 @@ func runStart(cmd *Command, args []string) {
 
 // initLoki inicializa el cliente de Loki y espera a que esté listo antes de continuar.
 func initLoki(of *OutletFactory) {
-	if flagLokiURL == "" {
+	if flagLokiURL == "" || lokiClient != nil {
 		return
 	}
-	lokiClient = NewLokiClient(flagLokiURL, 10*time.Second)
+	lokiClient = NewLokiClient(flagLokiURL, 10*time.Second, 1*time.Second, 500)
 	of.SystemOutput(fmt.Sprintf("Loki habilitado: %s (job=%s)", flagLokiURL, flagLokiJob))
 
 	// Espera readiness
