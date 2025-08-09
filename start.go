@@ -356,7 +356,7 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 	}()
 }
 
-func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
 	port, err := basePort(env)
 	if err != nil {
 		panic(err)
