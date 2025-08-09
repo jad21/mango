@@ -356,7 +356,88 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 	}()
 }
 
-func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+func (f *Forego) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+	port, err := basePort(env)
+	if err != nil {
+		panic(err)
+	}
+
+	port = port + (idx * 100)
+
+	const interactive = false
+	workDir := filepath.Dir(flagProcfile)
+	ps := NewProcess(workDir, proc.Command, env, interactive)
+	procName := fmt.Sprint(proc.Name, ".", procNum+1)
+	ps.Env["PORT"] = strconv.Itoa(port)
+
+	ps.Stdin = nil
+
+	stdout, err := ps.StdoutPipe()
+	if err != nil {
+		panic(err)
+	}
+	stderr, err := ps.StderrPipe()
+	if err != nil {
+		panic(err)
+	}
+
+	pipeWait := new(sync.WaitGroup)
+	pipeWait.Add(2)
+	go of.LineReader(pipeWait, procName, idx, stdout, false)
+	go of.LineReader(pipeWait, procName, idx, stderr, true)
+
+	of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
+
+	finished := make(chan struct{}) // closed on process exit
+
+	err = ps.Start()
+	if err != nil {
+		f.teardown.Fall()
+		of.SystemOutput(fmt.Sprint("Failed to start ", procName, ": ", err))
+		return
+	}
+
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
+		defer close(finished)
+		pipeWait.Wait()
+		ps.Wait()
+	}()
+
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
+
+		select {
+		case <-finished:
+			if flagRestart {
+				f.startProcess(idx, procNum, proc, env, of)
+			} else {
+				f.teardown.Fall()
+			}
+
+		case <-f.teardown.Barrier():
+			// Forego tearing down
+
+			if !osHaveSigTerm {
+				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
+				ps.Process.Kill()
+				return
+			}
+
+			of.SystemOutput(fmt.Sprintf("sending SIGTERM to %s", procName))
+			ps.SendSigTerm()
+
+			// Give the process a chance to exit, otherwise kill it.
+			select {
+			case <-f.teardownNow.Barrier():
+				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
+				ps.SendSigKill()
+			case <-finished:
+			}
+		}
+	}()
 }
 
 func runStart(cmd *Command, args []string) {
