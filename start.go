@@ -216,7 +216,7 @@ func basePort(env Env) (int, error) {
 	return defaultPort, nil
 }
 
-func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
 	// Determinar puerto
 	port, err := basePort(env)
 	if err != nil {
@@ -354,6 +354,9 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			}
 		}
 	}()
+}
+
+func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
 }
 
 func runStart(cmd *Command, args []string) {
