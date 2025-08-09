@@ -227,8 +227,9 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 	}
 
 	// Crear proceso
+	const interactive = false
 	workDir := filepath.Dir(flagProcfile)
-	ps := NewProcess(workDir, proc.Command, env, false)
+	ps := NewProcess(workDir, proc.Command, env, interactive)
 	var procName string
 	if procNum > 1 {
 		procName = fmt.Sprintf("%s.%d", proc.Name, procNum+1)
@@ -250,7 +251,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 	}
 
 	// WaitGroup para esperar a que stdout y stderr terminen
-	pipeWait := &sync.WaitGroup{}
+	pipeWait := new(sync.WaitGroup)
 
 	// --- Stdout ---
 	pipeWait.Add(1)
@@ -299,22 +300,22 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 		of.SystemOutput(fmt.Sprintf("starting %s", procName))
 	}
 
+	// Canal cerrado cuando el proceso y la lectura de salidas finaliza
+	finished := make(chan struct{})
+
 	// Iniciar el proceso
-	if err := ps.Start(); err != nil {
+	err = ps.Start()
+	if err != nil {
 		f.teardown.Fall()
 		of.SystemOutput(fmt.Sprint("Failed to start ", procName, ": ", err))
 		return
 	}
-
-	// Canal cerrado cuando el proceso y la lectura de salidas finaliza
-	finished := make(chan struct{})
 
 	// Goroutine que espera stdout+stderr + ps.Wait()
 	f.wg.Add(1)
 	go func() {
 		defer f.wg.Done()
 		defer close(finished)
-
 		pipeWait.Wait()
 		ps.Wait()
 	}()
@@ -333,6 +334,8 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			}
 
 		case <-f.teardown.Barrier():
+			// Forego tearing down
+
 			if !osHaveSigTerm {
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
 				ps.Process.Kill()
@@ -342,6 +345,7 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 			of.SystemOutput(fmt.Sprintf("sending SIGTERM to %s", procName))
 			ps.SendSigTerm()
 
+			// Give the process a chance to exit, otherwise kill it.
 			select {
 			case <-f.teardownNow.Barrier():
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
