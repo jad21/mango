@@ -1,6 +1,6 @@
 module github.com/jad21/mango
 
-go 1.23.10
+go 1.18
 
 require (
 	github.com/daviddengcn/go-colortext v1.0.0

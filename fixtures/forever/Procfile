@@ -1,0 +1,2 @@
+worker1: while :; do echo worker1 $$; sleep 5; done
+worker2: while :; do echo worker2 $$; sleep 5; done

@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  loki:
+    image: grafana/loki:2.9.2
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  mango:
+    build:
+      context: ../..        # raíz del repo
+      dockerfile: Dockerfile
+    depends_on:
+      - loki
+    volumes:
+      - ./:/app/fixtures/loki
+    working_dir: /app
+    command:
+      [
+        "./mango",
+        "start",
+        "-f",
+        "fixtures/loki/Procfile",
+        "--loki.url=http://loki:3100/loki/api/v1/push",
+        "--loki.job=test-logger"
+      ]

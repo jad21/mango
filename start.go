@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const defaultPort = 5000
+const defaultPort = 0
 const defaultShutdownGraceTime = 3
 
 var flagPort int
@@ -191,6 +191,7 @@ func (f *mango) monitorInterrupt() {
 	first := true
 
 	for sig := range handler {
+		fmt.Printf("mango    | monitorInterrupt: got signal %s\n", sig) // ← log
 		switch sig {
 		case syscall.SIGINT:
 			fmt.Println("      | ctrl-c detected")
@@ -216,31 +217,34 @@ func basePort(env Env) (int, error) {
 	return defaultPort, nil
 }
 
-func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
-	// Determinar puerto
-	port, err := basePort(env)
+func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
+	// ===== entorno por proceso =====
+	envCopy := env.Clone()
+
+	// Puerto base
+	port, err := basePort(envCopy)
 	if err != nil {
 		panic(err)
 	}
 	if port > 0 {
 		port += idx * 100
+		envCopy["PORT"] = strconv.Itoa(port)
 	}
 
-	// Crear proceso
+	// Proceso
 	const interactive = false
 	workDir := filepath.Dir(flagProcfile)
-	ps := NewProcess(workDir, proc.Command, env, interactive)
+	ps := NewProcess(workDir, proc.Command, envCopy, interactive)
+
+	// Nombre visible
 	var procName string
 	if procNum > 1 {
 		procName = fmt.Sprintf("%s.%d", proc.Name, procNum+1)
 	} else {
 		procName = proc.Name
 	}
-	if port > 0 {
-		ps.Env["PORT"] = strconv.Itoa(port)
-	}
 
-	// Tubos para capturar stdout/stderr
+	// Pipes
 	stdout, err := ps.StdoutPipe()
 	if err != nil {
 		panic(err)
@@ -250,7 +254,6 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 		panic(err)
 	}
 
-	// WaitGroup para esperar a que stdout y stderr terminen
 	pipeWait := new(sync.WaitGroup)
 
 	// --- Stdout ---
@@ -260,17 +263,15 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 		if lokiClient != nil {
 			pr, pw := io.Pipe()
 			reader = io.TeeReader(stdout, pw)
-
 			go func() {
 				scanner := bufio.NewScanner(pr)
 				for scanner.Scan() {
 					lokiClient.Send(flagLokiJob, procName, scanner.Text())
 				}
-				pr.Close()
+				_ = pr.Close()
 			}()
 			defer pw.Close()
 		}
-		// LineReader hace un Done() al acabar
 		of.LineReader(pipeWait, procName, idx, reader, false)
 	}()
 
@@ -281,13 +282,12 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 		if lokiClient != nil {
 			pr, pw := io.Pipe()
 			reader = io.TeeReader(stderr, pw)
-
 			go func() {
 				scanner := bufio.NewScanner(pr)
 				for scanner.Scan() {
 					lokiClient.Send(flagLokiJob, procName, scanner.Text())
 				}
-				pr.Close()
+				_ = pr.Close()
 			}()
 			defer pw.Close()
 		}
@@ -300,111 +300,51 @@ func (f *mango) StartProcessWithLoki(idx, procNum int, proc ProcfileEntry, env E
 		of.SystemOutput(fmt.Sprintf("starting %s", procName))
 	}
 
-	// Canal cerrado cuando el proceso y la lectura de salidas finaliza
+	// Señal de finalización de I/O + proceso
 	finished := make(chan struct{})
 
-	// Iniciar el proceso
+	// ===== Start =====
 	err = ps.Start()
 	if err != nil {
-		f.teardown.Fall()
-		of.SystemOutput(fmt.Sprint("Failed to start ", procName, ": ", err))
+		of.SystemOutput(fmt.Sprintf("Failed to start %s: %v", procName, err))
+		of.SystemOutput(fmt.Sprintf("teardown cause: start-error (%s)", procName))
+		f.teardown.Fall() // ← log explícito del origen
 		return
 	}
 
-	// Goroutine que espera stdout+stderr + ps.Wait()
+	// ===== Espera de I/O + Wait() con logging detallado =====
 	f.wg.Add(1)
 	go func() {
 		defer f.wg.Done()
 		defer close(finished)
+
+		// Espera a que terminen lectores
 		pipeWait.Wait()
-		ps.Wait()
-	}()
 
-	// Goroutine que maneja reinicio o teardown
-	f.wg.Add(1)
-	go func() {
-		defer f.wg.Done()
+		// Espera del proceso
+		waitErr := ps.Wait()
 
-		select {
-		case <-finished:
-			if flagRestart {
-				f.startProcess(idx, procNum, proc, env, of)
+		// Log de salida: código o señal
+		if waitErr != nil {
+			of.SystemOutput(fmt.Sprintf("%s exited with error: %v", procName, waitErr))
+		}
+
+		if ps.ProcessState != nil {
+			if status, ok := ps.ProcessState.Sys().(syscall.WaitStatus); ok {
+				if status.Signaled() {
+					of.SystemOutput(fmt.Sprintf("%s exit signal: %s", procName, status.Signal()))
+				} else {
+					of.SystemOutput(fmt.Sprintf("%s exit code: %d", procName, status.ExitStatus()))
+				}
 			} else {
-				f.teardown.Fall()
+				of.SystemOutput(fmt.Sprintf("%s exited (state: %v)", procName, ps.ProcessState))
 			}
-
-		case <-f.teardown.Barrier():
-			// Forego tearing down
-
-			if !osHaveSigTerm {
-				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
-				ps.Process.Kill()
-				return
-			}
-
-			of.SystemOutput(fmt.Sprintf("sending SIGTERM to %s", procName))
-			ps.SendSigTerm()
-
-			// Give the process a chance to exit, otherwise kill it.
-			select {
-			case <-f.teardownNow.Barrier():
-				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
-				ps.SendSigKill()
-			case <-finished:
-			}
+		} else {
+			of.SystemOutput(fmt.Sprintf("%s exited (no process state)", procName))
 		}
 	}()
-}
 
-func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *OutletFactory) {
-	port, err := basePort(env)
-	if err != nil {
-		panic(err)
-	}
-
-	port = port + (idx * 100)
-
-	const interactive = false
-	workDir := filepath.Dir(flagProcfile)
-	ps := NewProcess(workDir, proc.Command, env, interactive)
-	procName := fmt.Sprint(proc.Name, ".", procNum+1)
-	ps.Env["PORT"] = strconv.Itoa(port)
-
-	ps.Stdin = nil
-
-	stdout, err := ps.StdoutPipe()
-	if err != nil {
-		panic(err)
-	}
-	stderr, err := ps.StderrPipe()
-	if err != nil {
-		panic(err)
-	}
-
-	pipeWait := new(sync.WaitGroup)
-	pipeWait.Add(2)
-	go of.LineReader(pipeWait, procName, idx, stdout, false)
-	go of.LineReader(pipeWait, procName, idx, stderr, true)
-
-	of.SystemOutput(fmt.Sprintf("starting %s on port %d", procName, port))
-
-	finished := make(chan struct{}) // closed on process exit
-
-	err = ps.Start()
-	if err != nil {
-		f.teardown.Fall()
-		of.SystemOutput(fmt.Sprint("Failed to start ", procName, ": ", err))
-		return
-	}
-
-	f.wg.Add(1)
-	go func() {
-		defer f.wg.Done()
-		defer close(finished)
-		pipeWait.Wait()
-		ps.Wait()
-	}()
-
+	// ===== Política de restart/teardown =====
 	f.wg.Add(1)
 	go func() {
 		defer f.wg.Done()
@@ -412,24 +352,26 @@ func (f *mango) startProcess(idx, procNum int, proc ProcfileEntry, env Env, of *
 		select {
 		case <-finished:
 			if flagRestart {
+				of.SystemOutput(fmt.Sprintf("restart policy: restarting %s", procName))
+				// Reinicio del mismo proceso (mismo idx/procNum)
 				f.startProcess(idx, procNum, proc, env, of)
 			} else {
+				of.SystemOutput(fmt.Sprintf("teardown cause: %s finished (no -r)", procName))
 				f.teardown.Fall()
 			}
 
 		case <-f.teardown.Barrier():
-			// Forego tearing down
-
+			// Teardown global
+			of.SystemOutput(fmt.Sprintf("teardown path: sending SIGTERM to %s", procName))
 			if !osHaveSigTerm {
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))
-				ps.Process.Kill()
+				_ = ps.Process.Kill()
 				return
 			}
 
-			of.SystemOutput(fmt.Sprintf("sending SIGTERM to %s", procName))
 			ps.SendSigTerm()
 
-			// Give the process a chance to exit, otherwise kill it.
+			// Grace period o salida del proceso
 			select {
 			case <-f.teardownNow.Barrier():
 				of.SystemOutput(fmt.Sprintf("Killing %s", procName))

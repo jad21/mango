@@ -1,0 +1,7 @@
+procfile=fixtures/loki/Procfile
+port=6000
+shutdown_grace_time=5
+
+# Loki config
+loki.url=http://loki:3100/loki/api/v1/push
+loki.job=test-logger

@@ -70,3 +70,11 @@ func (e *Env) asArray() (env []string) {
 	}
 	return
 }
+
+func (e Env) Clone() Env {
+	c := make(Env, len(e))
+	for k, v := range e {
+		c[k] = v
+	}
+	return c
+}
